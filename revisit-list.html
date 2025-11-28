@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Revisit List</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3e0.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3e0.png">
+  <link rel="manifest" href="data:application/manifest+json,{
+    \"name\":\"Revisit List\",\"short_name\":\"Revisit\",
+    \"start_url\":\".\",\"display\":\"standalone\",
+    \"background_color\":\"#f4f6f9\",\"theme_color\":\"#0066ff\",
+    \"icons\":[{\"src\":\"https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3e0.png\",\"sizes\":\"any\",\"type\":\"image/png\"}]
+  }">
+  <meta name="theme-color" content="#0066ff">
+  <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:0;padding:15px;background:#f4f6f9;color:#1a1a1a;}
+    h1{text-align:center;margin:10px 0 20px;font-size:20px;}
+    input,textarea{width:100%;padding:14px;margin:8px 0;border-radius:12px;border:1px solid #ddd;font-size:16px;box-sizing:border-box;}
+    .add-btn{
+      display:block;width:200px;margin:18px auto 22px;padding:12px 20px;
+      background:#0066ff;color:white;border:none;border-radius:30px;
+      font-size:15px;font-weight:600;cursor:pointer;
+      box-shadow:0 3px 12px rgba(0,102,255,0.35);transition:all 0.2s;
+    }
+    .add-btn:hover{background:#0058d4;transform:translateY(-2px);}
+    .search-box{position:relative;margin:20px 0;background:white;border-radius:16px;box-shadow:0 4px 15px rgba(0,0,0,0.1);overflow:hidden;}
+    .search-box input{width:100%;border:none;outline:none;padding:16px 20px 16px 52px;font-size:16px;background:transparent;}
+    .search-box svg{position:absolute;left:18px;top:50%;transform:translateY(-50%);width:20px;height:20px;opacity:0.5;pointer-events:none;}
+    .item{background:white;padding:18px;margin-bottom:12px;border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,0.08);position:relative;}
+    .address{color:#0066ff;font-weight:600;text-decoration:underline;cursor:pointer;font-size:17px;}
+    .note{margin-top:10px;font-size:14px;color:#333;line-height:1.6;}
+    .note-short{display:block;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;cursor:pointer;}
+    .note-full{display:none;}
+    .note.show .note-short{display:none;}
+    .note.show .note-full{display:block;}
+    .more{color:#0066ff;font-size:12px;margin-top:4px;cursor:pointer;}
+    .note-edit{display:none;margin-top:10px;}
+    .note-edit input,.note-edit textarea{width:100%;margin:8px 0;padding:10px;box-sizing:border-box;}
+    .btn-small{padding:8px 14px;font-size:13px;border-radius:8px;margin-right:6px;cursor:pointer;}
+    .save-btn{background:#28a745;color:white;border:none;}
+    .cancel-btn{background:#6c757d;color:white;border:none;}
+    .edit-btn{color:#0066ff;font-size:12px;cursor:pointer;text-decoration:underline;margin-left:8px;}
+    .date-display{font-size:12px;color:#666;margin-top:8px;}
+    .delete-btn{position:absolute;top:12px;right:12px;width:40px;height:40px;background:#dc3545;color:white;
+      border:none;border-radius:50%;display:flex;align-items:center;justify-content:center;
+      box-shadow:0 3px 10px rgba(220,53,69,0.4);}
+    .delete-btn:hover{background:#c82333;transform:scale(1.1);}
+    .delete-btn svg{width:20px;height:20px;}
+  </style>
+</head>
+<body>
+  <h1>Revisit List <small id="count" style="color:#666;"></small></h1>
+
+  <input type="text" id="house" placeholder="Address (e.g. IM 1/24)">
+  <input type="text" id="houseNo" placeholder="House No">
+  <textarea id="note" placeholder="Notes" rows="4"></textarea>
+  <button class="add-btn" onclick="save()">Add Entry</button>
+
+  <div class="search-box">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+    <input type="text" id="search" placeholder="Search address or notes">
+  </div>
+
+  <div class="list" id="list"></div>
+
+<!-- JSON Export / Import（控えめ・一番下） -->
+  <div style="margin:50px auto 30px;text-align:center;font-size:14px;color:#666;">
+    <button onclick="exportJSON()" 
+            style="font-size:13px;padding:8px 16px;background:#0066ff;color:white;border:none;border-radius:8px;cursor:pointer;">
+      Export as JSON
+    </button>
+    <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importJSON(event)">
+    <button onclick="document.getElementById('importFile').click()" 
+            style="margin-left:12px;font-size:13px;padding:8px 16px;background:#6c757d;color:white;border:none;border-radius:8px;cursor:pointer;">
+      Import JSON
+    </button>
+  </div>
+
+  <script>
+    const db = localforage.createInstance({name:"SalesRevisit"});
+
+    function formatDate(date) {
+      const d = new Date(date);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = String(d.getFullYear()).slice(-2);
+      return `${day}-${month}-${year}`;
+    }
+
+    function save(){
+      const h = document.getElementById('house').value.trim();
+      const hn = document.getElementById('houseNo').value.trim();
+      const n = document.getElementById('note').value.trim();
+      if(!h) return alert('Address is required');
+      const address = hn ? `${h}-${hn}` : h;
+      const id = Date.now();
+
+      db.setItem(id.toString(), {
+        id, address, note: n, createdDate: new Date()
+      }).then(()=>{
+        document.getElementById('house').value='';
+        document.getElementById('houseNo').value='';
+        document.getElementById('note').value='';
+        load();
+      });
+    }
+
+    function toggleNote(id) {
+      const noteDiv = document.querySelector(`[data-id="${id}"] .note`);
+      noteDiv.classList.toggle('show');
+    }
+
+    function startEdit(id) {
+      const item = document.querySelector(`[data-id="${id}"]`);
+      item.querySelector('.note').style.display = 'none';
+      item.querySelector('.address').style.display = 'none';
+      item.querySelector('.edit-btn').style.display = 'none';
+      const editDiv = item.querySelector('.note-edit');
+      editDiv.style.display = 'block';
+      editDiv.querySelector('.edit-address').value = item.dataset.address;
+      editDiv.querySelector('.edit-note').value = item.dataset.note || '';
+    }
+
+    function saveEdit(id) {
+      const item = document.querySelector(`[data-id="${id}"]`);
+      const newAddress = item.querySelector('.edit-address').value.trim();
+      const newNote = item.querySelector('.edit-note').value;
+      if(!newAddress) return alert('Address cannot be empty');
+
+      db.getItem(id.toString()).then(record => {
+        record.address = newAddress;
+        record.note = newNote;
+        return db.setItem(id.toString(), record);
+      }).then(() => load());
+    }
+
+    function cancelEdit(id) {
+      const item = document.querySelector(`[data-id="${id}"]`);
+      item.querySelector('.note-edit').style.display = 'none';
+      item.querySelector('.note').style.display = 'block';
+      item.querySelector('.address').style.display = 'inline';
+      item.querySelector('.edit-btn').style.display = 'inline';
+    }
+
+    function load(){
+      const q = document.getElementById('search').value.toLowerCase();
+      db.keys().then(keys=>Promise.all(keys.map(k=>db.getItem(k)))).then(rec=>{
+        let list = rec;
+        if(q) list = list.filter(x=>x.address.toLowerCase().includes(q) || (x.note && x.note.toLowerCase().includes(q)));
+        list.sort((a,b)=>b.id - a.id);
+        document.getElementById('count').textContent = `(Total ${rec.length} / Showing ${list.length})`;
+        document.getElementById('list').innerHTML = list.length===0 ?
+          '<p style="text-align:center;color:#999;">No records yet</p>' :
+          list.map(x=>`
+            <div class="item" data-id="${x.id}" data-address="${x.address}" data-note="${(x.note||'').replace(/"/g,'&quot;')}">
+              <button class="delete-btn" onclick="del(${x.id})" title="Delete">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+              <div style="padding-right:50px;">
+                <span onclick="openMap('${x.address}')" class="address">${x.address}</span>
+                <span class="edit-btn" onclick="startEdit(${x.id})">[Edit]</span>
+              </div>
+              ${x.note ? `
+                <div class="note">
+                  <div class="note-short" onclick="toggleNote(${x.id})">${x.note.replace(/\n/g,'<br>')}</div>
+                  <div class="note-full" onclick="toggleNote(${x.id})">${x.note.replace(/\n/g,'<br>')}</div>
+                  <div class="more" onclick="toggleNote(${x.id})">…Show more</div>
+                </div>
+              ` : '<div class="note"><em style="color:#aaa;">No notes yet (tap Edit to add)</em></div>'}
+              <div class="note-edit">
+                <input type="text" class="edit-address" placeholder="Address">
+                <textarea class="edit-note" rows="5" placeholder="Notes"></textarea>
+                <div style="margin-top:8px;">
+                  <button class="btn-small save-btn" onclick="saveEdit(${x.id})">Save</button>
+                  <button class="btn-small cancel-btn" onclick="cancelEdit(${x.id})">Cancel</button>
+                </div>
+              </div>
+              <div class="date-display">Created: ${formatDate(x.createdDate)}</div>
+            </div>`).join('');
+      });
+    }
+
+    function openMap(a){window.open('https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a),'_blank');}
+    function del(i){if(confirm('Delete this entry permanently?')) db.removeItem(i.toString()).then(load);}
+
+    document.getElementById('search').addEventListener('input',load);
+
+// ← ここに exportJSON() を挿入！（この行の直前でも直後でもOKだが、importJSONの下がベスト）
+function exportJSON() {
+      // 検索中の場合は表示されているものだけ、全件の場合は全部
+      const q = document.getElementById('search').value.toLowerCase().trim();
+      
+      db.keys().then(keys => Promise.all(keys.map(k => db.getItem(k))))
+        .then(allRecords => {
+          let recordsToExport = allRecords;
+
+          // 検索ワードが入ってたら、画面に表示されてるものだけに絞る
+          if (q) {
+            recordsToExport = allRecords.filter(x => 
+              x.address.toLowerCase().includes(q) || 
+              (x.note && x.note.toLowerCase().includes(q))
+            );
+          }
+
+          if (recordsToExport.length === 0) {
+            return alert('No records to export');
+          }
+
+          const data = recordsToExport.map(r => ({
+            id: r.id,
+            address: r.address,
+            note: r.note || '',
+            createdDate: r.createdDate.toISOString()
+          }));
+
+          const json = JSON.stringify(data, null, 2);
+          const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          
+          // 検索中ならファイル名に「-filtered」を付ける（わかりやすく）
+          const suffix = q ? '-filtered' : '';
+          link.download = `revisit-list${suffix}-${new Date().toISOString().slice(0,10)}.json`;
+          
+          link.click();
+          URL.revokeObjectURL(url);
+        });
+    }
+
+    function importJSON(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (!Array.isArray(data)) throw 'invalid';
+          const promises = data.map(item => {
+            if (item.id && item.address) {
+              return db.setItem(String(item.id), {
+                id: Number(item.id),
+                address: item.address,
+                note: item.note || '',
+                createdDate: new Date(item.createdDate)
+              });
+            }
+          });
+          Promise.all(promises.filter(p => p)).then(() => {
+            alert(`Imported ${promises.filter(p => p).length} records successfully`);
+            load();
+          });
+        } catch(err) {
+          alert('Import failed: Invalid or corrupted JSON file');
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
+
+    load();
+  </script>
+</body>
+</html>
